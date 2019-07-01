@@ -39,25 +39,6 @@ Lesser General Public License for more details.
 You should have received a copy of the GNU Lesser General Public
 License along with this library; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
-
-
-================== Notes on Various Arduino-Type Processors ====================
-
-This library requires the use of pin change interrupts (PCINT).
-
-Not all Arduino boards have the same pin capabilities.
-The known compatibile pins for common variants are shown below.
-
-Arduino Uno: 	All pins.
-Arduino Mega or Mega 2560:
-10, 11, 12, 13, 14, 15, 50, 51, 52, 53, A8 (62),
-A9 (63), A10 (64), A11 (65), A12 (66), A13 (67), A14 (68), A15 (69).
-
-Arduino Leonardo:
-8, 9, 10, 11, 14 (MISO), 15 (SCK), 16 (MOSI)
-
-Arduino Zero:
-Any pin except 4
 */
 
 #ifndef SDI12_h
@@ -73,14 +54,12 @@ Any pin except 4
 #include "pins_arduino.h"  // for digitalPinToBitMask, etc
 #endif
 
-// Board-specific macros for direct GPIO
-// These are taken from the OneWire library.  Setting and reading pins (high/low)
-// is faster this way.
-#include "util/OneWire_direct_gpio.h"
+#include <Stream.h>             // Arduino Stream library
 
 typedef const __FlashStringHelper *FlashString;
 
 #define NO_IGNORE_CHAR '\x01' // a char not found in a valid ASCII numeric field
+#define SDI12_BUFFER_SIZE 64   // max Rx buffer size
 
 class SDI12 : public Stream
 {
@@ -89,30 +68,47 @@ protected:
   int peekNextDigit(LookaheadMode lookahead, bool detectDecimal);
 
 private:
-  uint8_t _dataPin;               // for the data pin
-  IO_REG_TYPE bitmask;            // for the bit mask of the data pin
-  volatile IO_REG_TYPE *baseReg;  // for the base processor register of the data pin
-  bool _bufferOverflow;           // for the buffer overflow status
+
+  // For the various SDI12 states
+  typedef enum SDI12_STATES
+  {
+    DISABLED = 0,
+    ENABLED = 1,
+    HOLDING = 2,
+    TRANSMITTING = 3,
+    LISTENING = 4
+  } SDI12_STATES;
 
   static SDI12 *_activeObject;    // static pointer to active SDI12 instance
-  void setState(uint8_t state);   // sets the state of the SDI12 objects
+
+  void setPinInterrupts(bool enable);  // Turns pin interrupts on or off
+  void setState(SDI12_STATES state);   // sets the state of the SDI12 objects
   void wakeSensors();             // used to wake up the SDI12 bus
   void writeChar(uint8_t out);    // used to send a char out on the data line
   void receiveChar();             // used by the ISR to grab a char from data line
-
-  static const char * getStateName(uint8_t state);     // get state name (in ASCII)
 
   #ifndef __AVR__
     static uint8_t parity_even_bit(uint8_t v);
   #endif
 
+  uint8_t _dataPin;               // reference to the data pin
+
+  static uint8_t _rxBuffer[SDI12_BUFFER_SIZE];  // A single buffer for ALL SDI-12 objects
+  static volatile uint8_t _rxBufferTail;
+  static volatile uint8_t _rxBufferHead;
+  bool _bufferOverflow;           // buffer overflow status
+
+
 public:
+  SDI12();                          // constructor - without argument, for better library integration
   SDI12(uint8_t dataPin);           // constructor
   ~SDI12();                         // destructor
   void begin();                     // enable SDI-12 object
+  void begin(uint8_t dataPin);      // enable SDI-12 object - if you use the empty constuctor, USE THIS
   void end();                       // disable SDI-12 object
-  void setTimeoutValue(int value);  // sets the value to return if a parse int or parse float times out
   int TIMEOUT;                      // value to return if a parse times out
+  void setTimeoutValue(int value);  // sets the value to return if a parse int or parse float times out
+  uint8_t getDataPin();             // returns the data pin for the current instace
 
   void forceHold();                     // sets line state to HOLDING
   void forceListen();                   // sets line state to LISTENING
@@ -128,8 +124,7 @@ public:
   int read();                 // returns next byte in the buffer (consumes)
   void clearBuffer();         // clears the buffer
   void flush(){};             // Waits for sending to finish - because no TX buffering, does nothing
-  virtual size_t write(uint8_t byte){return 1;}  // dummy function required to inherit from Stream
-
+  virtual size_t write(uint8_t byte);  // standard stream function
 
   // hide the Stream equivalents to allow custom value to be returned on timeout
   long parseInt(LookaheadMode lookahead = SKIP_ALL, char ignore = NO_IGNORE_CHAR);
@@ -140,27 +135,8 @@ public:
 
   static void handleInterrupt();  // intermediary used by the ISR
 
-  // #define SDI12_EXTERNAL_PCINT  // uncomment to use your own PCINT ISRs
+  // #define SDI12_EXTERNAL_PCINT  // on AVR boards, uncomment to use your own PCINT ISRs
 
 };
-
-// Undefine macros from OneWire_direct_gpio.h
-// Do not allow these to "leak" into Arduino sketches and other libraries
-#undef OneWire_Direct_GPIO_h
-#undef PIN_TO_BASEREG
-#undef PIN_TO_BITMASK
-#undef IO_REG_TYPE
-#undef IO_REG_BASE_ATTR
-#undef IO_REG_MASK_ATTR
-#undef DIRECT_READ
-#undef DIRECT_MODE_INPUT
-#undef DIRECT_MODE_OUTPUT
-#undef DIRECT_WRITE_LOW
-#undef DIRECT_WRITE_HIGH
-#ifdef ARDUINO_ARCH_ESP32
-  #undef noInterrupts()
-  #undef interrupts()
-#endif
-
 
 #endif  // SDI12_h
