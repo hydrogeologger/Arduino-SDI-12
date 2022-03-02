@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+
+class String; // Forward declaration for WString.h String object
 
 // #define SDI12_DIGITS_MAX 7 // Number of total characters allowed for value string
 // #define SDI12_VALUE_MAX 9
@@ -83,10 +86,18 @@ class SDI12Sensor {
     char Address(void) const; // Get SDI slave address
     //     void SendSensorAddress();
     //     void SendSensorID();
-  
+
   protected:
     char GetAddressFromEEPROM(void) const;
 };
+
+/* Supporting functions not class scope specific */
+
+size_t IntegralLength(double value);
+size_t dtoa(double value, char *str, uint8_t prec = 0, uint8_t fit_len = 0,
+        bool zero_trail = false, bool pos_sign = true);
+size_t dtoa(double value, String &str, uint8_t prec = 0, uint8_t fit_len = 0,
+        bool zero_trail = false, bool pos_sign = true);
 
 // void FormatOutputSDI(float *measurementValues, String *dValues, unsigned int
 // maxChar);
