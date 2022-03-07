@@ -11,6 +11,9 @@
 /* Default VALUES */
 #define DEFAULT_SENSOR_ADDR '0' // Default Sensor Address
 
+/* Initialize Static Variables */
+SDI12Sensor *SDI12Sensor::last_set_active_object_ = nullptr; // Pointer reference to active SDI12Sensor instance
+
 
 /**
  * @brief Construct a default SDI12Sensor::SDI12Sensor object.
@@ -71,7 +74,8 @@ SDI12Sensor::SDI12Sensor(const char address, const int eeprom_address) {
  * @see SDI12Sensor(const char address, const int eeprom_address)
  */
 SDI12Sensor::~SDI12Sensor(void) {
-    // Do nothing
+    // Reset active reference if current instance is being destroyed
+    if (IsActive()) { ClearLastActive(); }
 }
 
 
@@ -121,6 +125,82 @@ char SDI12Sensor::GetAddressFromEEPROM(void) const {
         return EEPROM.read(eeprom_address_);
     }
     return '\0';
+}
+
+
+/**
+ * @brief Sets the active state of the current SDI12Sensor instance.
+ *
+ * @param active (optional) defaults: true
+ * @return true SDI12 object active status has changed
+ * @return false SDI12 object active status was the same and not changed
+ */
+bool SDI12Sensor::SetActive(const bool active) {
+    if (last_set_active_object_ != this && active) {
+        last_set_active_object_ = this;
+        active_ = true;
+        return true;
+    } else if (active_ != active) {
+        if (last_set_active_object_ == this && !active) {
+            ClearLastActive();
+        }
+        active_ = active;
+        return true;
+    }
+    return false;
+}
+
+
+/**
+ * @brief Checks if the current SDI12 object instance is set to active.
+ *
+ * @see SetActive(bool)
+ * @see ClearLastActive(void)
+ */
+bool SDI12Sensor::IsActive(void) const {
+  return active_;
+}
+
+
+/**
+ * @brief Get the pointer to last set active mutable SDI12Sensor object.
+ *
+ * @return SDI12Sensor* Pointer reference to  mutable active object, returns @c nullptr if no device is active
+ *
+ * @see SetActive(bool)
+ * @see ClearLastActive(void)
+ */
+SDI12Sensor *SDI12Sensor::LastActive(void) {
+    return last_set_active_object_;
+}
+
+
+/**
+ * @brief Clears the last set active SDI12Sensor object, resets
+ * the @p last_set_active_object_ reference to @c nullptr
+ *
+ * @see IsSetLastActive(void)
+ * @see LastActive(void)
+ * @see SetActive(bool)
+ * @see ClearLastActive(void)
+ */
+void SDI12Sensor::ClearLastActive(void) {
+    last_set_active_object_->active_ = false;
+    last_set_active_object_ = nullptr;
+}
+
+
+/**
+ * @brief Checks if last active SDI12Sensor object is set.
+ *
+ * @return true last_set_active_object_ != nullptr
+ * @return false last_set_active_object_ == nullptr
+ *
+ * @see ClearLastActive(void)
+ * @see LastActive(void)
+ */
+bool SDI12Sensor::IsSetLastActive(void) {
+    return (last_set_active_object_ != nullptr);
 }
 
 
