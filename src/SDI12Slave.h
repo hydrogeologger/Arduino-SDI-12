@@ -22,7 +22,7 @@
 class SDI12Slave : public SDI12 {
   private:
     /* Static SDI-12 Timing Reference for SDI-12 Slave Device */
-    static sdi12timer_t _previous_TCNT; // Stores micros on last ISR() execution
+    static unsigned long _previous_TCNT; // Stores micros on last ISR() execution
     bool waiting_for_break_ = true; // References device waiting for line break
     bool waiting_for_mark_ = true; // References device waiting for line marking
 
