@@ -66,7 +66,7 @@ void pollSensor(float* measurementValues) {
     measurementValues[8] = -0.11111111;
 }
 
-void parseSdi12Cmd(String command, String* dValues) {
+void parseSdi12Cmd(String command, String* dValues, SDI12CommandSet_s *parsed_cmd) {
     /* Ingests a command from an SDI-12 master, sends the applicable response, and
      * (when applicable) sets a flag to initiate a measurement
      */
@@ -74,7 +74,8 @@ void parseSdi12Cmd(String command, String* dValues) {
     // First char of command is always either (a) the address of the device being
     // probed OR (b) a '?' for address query.
     // Do nothing if this command is addressed to a different device
-    if (command.charAt(0) != sensor.Address() && command.charAt(0) != '?') {
+    *parsed_cmd = SDI12Sensor::ParseCommand(command.c_str(), sensor.Address());
+    if (parsed_cmd->address != sensor.Address() && parsed_cmd->primary != kAddressQuery) {
         return;
     }
 
@@ -85,9 +86,13 @@ void parseSdi12Cmd(String command, String* dValues) {
     // or 'a!' (acknowledge active) commands, responseStr is blank so section is skipped
     String responseStr = "";
     responseStr += sensor.Address();
-    if (command.length() > 1) {
-        switch (command.charAt(1)) {
-            case 'I':
+    switch ((SDI12SensorCommand_e)parsed_cmd->primary) {
+        case kAddressQuery:
+        case kAcknowledge:
+            // Do not need to do anything
+            break;
+        case kIdentification:
+            if (parsed_cmd->secondary == kUnknown) {
                 // Identify command
                 // Slave should respond with ID message: 2-char SDI-12 version + 8-char
                 // company name + 6-char sensor model + 3-char sensor version + 0-13
@@ -97,68 +102,108 @@ void parseSdi12Cmd(String command, String* dValues) {
                         SDI12SENSOR_MODEL \
                         SDI12SENSOR_VERSION \
                         SDI12SENSOR_OTHER_INFO;
-                break;
-            case 'C':
-                // Initiate concurrent measurement command
-                // Slave should immediately respond with: "tttnn":
-                //    3-digit (seconds until measurement is available) +
-                //    2-digit (number of values that will be available)
-                // Slave should also start a measurment and relinquish control of the
-                // data line
-                responseStr += "02109";  // 9 values ready in 21 sec; Substitue
-                                        // sensor-specific values here
-                // It is not preferred for the actual measurement to occur in this
-                // subfunction, because doing to would hold the main program hostage
-                // until the measurement is complete.  Instead, we'll just set a flag
-                // and handle the measurement elsewhere.
-                state = INITIATE_CONCURRENT;
-                break;
-                // NOTE: "aC1...9!" commands may be added by duplicating this case and
-                // adding
-                //       additional states to the state flag
-            case 'M':
-                // Initiate measurement command
-                // Slave should immediately respond with: "tttnn":
-                //    3-digit (seconds until measurement is available) +
-                //    1-digit (number of values that will be available)
-                // Slave should also start a measurment but may keep control of the data
-                // line until advertised time elapsed OR measurement is complete and
-                // service request sent
-                responseStr += "0219";  // 9 values ready in 21 sec; Substitue
-                                       // sensor-specific values here
-                // It is not preferred for the actual measurement to occur in this
-                // subfunction, because doing to would hold the main program hostage
-                // until the measurement is complete.  Instead, we'll just set a flag
-                // and handle the measurement elsewhere. It is preferred though not
-                // required that the slave send a service request upon completion of the
-                // measurement.  This should be handled in the main loop().
-                state = INITIATE_MEASUREMENT;
-                break;
-                // NOTE: "aM1...9!" commands may be added by duplicating this case and
-                // adding
-                //       additional states to the state flag
+            } else if (parsed_cmd->secondary == kMeasurement &&
+                    parsed_cmd->param1 == 0) {
+                responseStr += "0219";
+            } else if (parsed_cmd->secondary == kConcurrentMeasurement &&
+                    parsed_cmd->param1 == 0) {
+                responseStr += "02109";
+            } else if (parsed_cmd->secondary == kMeasurement) {
+                responseStr += "0000";
+            } else if (parsed_cmd->secondary == kConcurrentMeasurement) {
+                responseStr += "00000";
+            } else if (parsed_cmd->secondary == kHighVolumeASCII ||
+                    parsed_cmd->secondary == kHighVolumeByte) {
+                responseStr += "000000";
+            }
+            break;
+        case kVerification:
+            // Not implemented
+            responseStr += "00000";
+            break;
+        case kHighVolumeASCII:
+        case kHighVolumeByte:
+            // Not implemented
+            responseStr += "000000";
+            sensor.SetCrcRequest(parsed_cmd->crc_requested); // Record if CRC was requested
+            break;
+        case kContinuousMeasurement:
+            // Not implemented
+            if (parsed_cmd->crc_requested) {
+                SDI12CRC crc(responseStr.c_str());
+                responseStr += crc.GetAscii();
+            }
+            break;
+        case kConcurrentMeasurement:
+            // Initiate concurrent measurement command
+            // Slave should immediately respond with: "tttnn":
+            //    3-digit (seconds until measurement is available) +
+            //    2-digit (number of values that will be available)
+            // Slave should also start a measurment and relinquish control of the
+            // data line
+            responseStr += "02109";  // 9 values ready in 21 sec; Substitue
+                                    // sensor-specific values here
+            // It is not preferred for the actual measurement to occur in this
+            // subfunction, because doing to would hold the main program hostage
+            // until the measurement is complete.  Instead, we'll just set a flag
+            // and handle the measurement elsewhere.
+            state = INITIATE_CONCURRENT;
+            sensor.SetCrcRequest(parsed_cmd->crc_requested); // Record if CRC was requested
+            break;
+            // NOTE: "aC1...9!" commands may be added by duplicating this case and
+            // adding
+            //       additional states to the state flag
+        case kMeasurement:
+            // Initiate measurement command
+            // Slave should immediately respond with: "tttnn":
+            //    3-digit (seconds until measurement is available) +
+            //    1-digit (number of values that will be available)
+            // Slave should also start a measurment but may keep control of the data
+            // line until advertised time elapsed OR measurement is complete and
+            // service request sent
+            responseStr += "0219";  // 9 values ready in 21 sec; Substitue
+                                    // sensor-specific values here
+            // It is not preferred for the actual measurement to occur in this
+            // subfunction, because doing to would hold the main program hostage
+            // until the measurement is complete.  Instead, we'll just set a flag
+            // and handle the measurement elsewhere. It is preferred though not
+            // required that the slave send a service request upon completion of the
+            // measurement.  This should be handled in the main loop().
+            state = INITIATE_MEASUREMENT;
+            sensor.SetCrcRequest(parsed_cmd->crc_requested); // Record if CRC was requested
+            break;
+            // NOTE: "aM1...9!" commands may be added by duplicating this case and
+            // adding
+            //       additional states to the state flag
 
-            case 'D':
-                // Send data command
-                // Slave should respond with a String of values
-                // Values to be returned must be split into Strings of 35 characters or
-                // fewer (75 or fewer for concurrent).  The number following "D" in the
-                // SDI-12 command specifies which String to send
-                if (!isdigit(command.charAt(2))) break;
-                responseStr += dValues[(int)command.charAt(2) - 48];
-                break;
-            case 'A':
-                // Change address command
-                // Slave should respond with blank message (just the [new] address +
-                // <CR> + <LF>)
-                sensor.SetAddress(command.charAt(2));
-                responseStr = sensor.Address();
-                break;
-            default:
-                // Mostly for debugging; send back UNKN if unexpected command received
-                responseStr += "UNKN";
-                break;
-        }
+        case kDataRequest:
+            // Send data command
+            // Slave should respond with a String of values
+            // Values to be returned must be split into Strings of 35 characters or
+            // fewer (75 or fewer for concurrent).  The number following "D" in the
+            // SDI-12 command specifies which String to send
+            if (parsed_cmd->param1 < 0 || parsed_cmd->param1 >= MEASUREMENT_ARRAY_MAX_SIZE) break;
+            responseStr += dValues[parsed_cmd->param1];
+            if (sensor.CrcRequested()) {
+                SDI12CRC crc(responseStr.c_str());
+                responseStr += crc.GetAscii();
+            }
+            break;
+        case kAddressChange:
+            // Change address command
+            // Slave should respond with blank message (just the [new] address +
+            // <CR> + <LF>)
+            sensor.SetAddress((char)parsed_cmd->param1);
+            responseStr = sensor.Address();
+            break;
+        case kUnknown:
+            // Mostly for debugging; send back UNKN if unexpected command received
+            responseStr += "UNKN";
+            break;
+        default:
+            // For debugging, to display accepted commands that haven't been checked for
+            responseStr += ",";
+            responseStr += command;
     }
 
     // Issue the response speficied in the switch-case structure above.
@@ -204,6 +249,7 @@ void loop() {
     static float measurementValues[MEASUREMENT_ARRAY_MAX_SIZE];  // Floats to hold simulated sensor data
     static String dValues[MEASUREMENT_STR_ARRAY_MAX_ELEMENT];  // String objects to hold the responses to aD0!-aD9! commands
     static String commandReceived = "";  // String object to hold the incoming command
+    SDI12CommandSet_s parsed_cmd;
 
 
     // If a byte is available, an SDI message is queued up. Read in the entire message
@@ -223,7 +269,7 @@ void loop() {
                 // eliminate the chance of getting anything else after the '!'
                 slaveSDI12.forceHold();
                 // Command string is completed; do something with it
-                parseSdi12Cmd(commandReceived, dValues);
+                parseSdi12Cmd(commandReceived, dValues, &parsed_cmd);
                 slaveSDI12.forceListen(); // Force listen if command is not recognized
                 // Clear command string to reset for next command
                 commandReceived = "";
