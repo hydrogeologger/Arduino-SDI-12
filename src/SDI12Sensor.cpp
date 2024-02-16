@@ -2,6 +2,8 @@
 
 #include <ctype.h>
 
+#include <EEPROM.h>
+
 /* Default VALUES */
 #define DEFAULT_SENSOR_ADDR '0' // Default Sensor Address
 
@@ -15,25 +17,45 @@
  * This empty constructor is provided for easier integration with other Arduino libraries.
  *
  * @see SetAddress(const char address)
- * @see SDI12Sensor(const char address)
+ * @see @see SDI12Sensor(const char address, const int eeprom_address)
  */
 SDI12Sensor::SDI12Sensor(void) {
     sensor_address_ = DEFAULT_SENSOR_ADDR;
+    eeprom_address_ = SDI12SENSOR_ERR_INVALID; // EEPROM use is set to disable
 }
 
 
 /**
  * @brief Construct a new SDI12Sensor::SDI12Sensor object with the address set.
  *
- * Sensor address defaults to Zero - '0' if address is not alpha numeric.
+ * Address is first obtained from eeprom if eeprom is enabled.
+ * @p eeprom_address needs to be 0 or greater to be enabled. EEPROM storage is
+ * disabled if @p eeprom_address is -1 (SDI12SENSOR_ERR_INVALID).
+ *
+ * If address obtained from eeprom is not alphanumeric, address is set from @p address
+ *
+ * Sensor address defaults to Zero - '0' if all address sources fail.
  * Device address can be changed with SDI12Sensor::SetAddress(address).
+ * NOTE: If eeprom is enabled, try not call SDI12Sensor::SetAddress(address) during
+ * initialization phase as it will force update the sensor address to eeprom.
  *
  * @param[in] address Single alpha numeric character representation of sensor address
+ * @param[in] eeprom_address (Optional) The location in eeprom memory to store device address, Default: -1 (EEPROM disabled)
  *
  * @see SetAddress(const char address)
  */
-SDI12Sensor::SDI12Sensor(const char address) {
-    if (!SetAddress(address)) {
+SDI12Sensor::SDI12Sensor(const char address, const int eeprom_address) {
+    // Check if EEPROM in use to store SDI address
+    if (eeprom_address >= 0) {
+        eeprom_address_ = eeprom_address;
+        sensor_address_ = GetAddressFromEEPROM(); // Get address from eeprom to start off
+    } else {
+        sensor_address_ = address;
+        eeprom_address_ = SDI12SENSOR_ERR_INVALID; // EEPROM use is set to disable
+    }
+
+    // Set to default address if address provided is invalid
+    if (!isalnum(sensor_address_)) {
         sensor_address_ = DEFAULT_SENSOR_ADDR;
     }
 }
@@ -42,7 +64,7 @@ SDI12Sensor::SDI12Sensor(const char address) {
 /**
  * @brief Destroy the SDI12Sensor::SDI12Sensor object
  * @see SDI12Sensor(void)
- * @see SDI12Sensor(const char address)
+ * @see SDI12Sensor(const char address, const int eeprom_address)
  */
 SDI12Sensor::~SDI12Sensor(void) {
     // Do nothing
@@ -52,15 +74,21 @@ SDI12Sensor::~SDI12Sensor(void) {
 /**
  * @brief Sets the sensor address of the SDI12Sensor object.
  *
+ * Will store address in EEPROM if SDI12Sensor object initialized with eeprom enabled.
+ *
  * @param[in] address Single alpha numeric character representation of sensor address
  * @return true Sensor address is alpha numeric and update sucessfull
  * @return false Sensor address was not updated
  *
  * @see Address(void)
+ * @see SDI12Sensor(const char address, const int eeprom_address)
  */
 bool SDI12Sensor::SetAddress(const char address) {
     if (isalnum(address)) {
         sensor_address_ = address;
+        if (eeprom_address_ >= 0) {
+            EEPROM.update(eeprom_address_, address);
+        }
         return true;
     }
     return false;
@@ -76,6 +104,19 @@ bool SDI12Sensor::SetAddress(const char address) {
  */
 char SDI12Sensor::Address(void) const {
     return sensor_address_;
+}
+
+
+/**
+ * @brief Get sensor address from EEPROM if eeprom enabled
+ *
+ * @return char Sensor address, returns null terminator '\0' if eeprom is disabled
+ */
+char SDI12Sensor::GetAddressFromEEPROM(void) const {
+    if (eeprom_address_ >= 0) {
+        return EEPROM.read(eeprom_address_);
+    }
+    return '\0';
 }
 
 

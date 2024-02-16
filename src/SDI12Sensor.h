@@ -30,6 +30,9 @@
 #define SDI12SENSOR_OTHER_INFO "001"  // (optional) up to 13 char for serial or other sensor info
 #endif
 
+/* ERROR MACRO */
+#define SDI12SENSOR_ERR_INVALID -1 // General INVALID/ERROR/DISABLE
+
 
 // struct Command_s {
 //     bool msgBreak;
@@ -70,15 +73,19 @@ class SDI12Sensor {
   private:
     /* Interal Variables */
     char sensor_address_;  // Reference to the sensor address, defaults is character '0'
+    int eeprom_address_; // Location in EEPROM to store sensor address, -1 if disabled
 
   public:
     SDI12Sensor(void);  // constructor - without argument, for better library integration
-    explicit SDI12Sensor(const char address);  // Constructor to declare sensor address
+    explicit SDI12Sensor(const char address, const int eeprom_address = SDI12SENSOR_ERR_INVALID);  // Constructor to declare sensor address
     ~SDI12Sensor(void); // Deconstructor
     bool SetAddress(const char address); // Set sensor address
     char Address(void) const; // Get SDI slave address
     //     void SendSensorAddress();
     //     void SendSensorID();
+  
+  protected:
+    char GetAddressFromEEPROM(void) const;
 };
 
 // void FormatOutputSDI(float *measurementValues, String *dValues, unsigned int
